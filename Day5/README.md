@@ -176,6 +176,95 @@ Select "pipeline" project
 ![jenkins](jenkins14.png)
 ![jenkins](jenkins15.png)
 
+## Lab - Ingress
+```
+cd ~/openshift-may-2024
+git pull
+cd Day5/ingress
+
+oc new-app --name=nginx bitnami/ngin
+oc expose service/nginx
+
+oc new-app --name=hello tektutor/spring-ms:1.0
+oc expose service/hello
+```
+
+Find you openshift cluster base domain and update the ingress.yml accordingly
+```
+oc get ingresses.config/cluster -o jsonpath={.spec.domain}
+```
+Expected output
+<pre>
+apps.ocp4.tektutor.org.labs	
+</pre>
+
+
+Once you have updated the base url in the ingress.yml file, you may below
+```
+cd ~/openshift-may-2024
+git pull
+cd Day5/ingress
+
+oc apply -f ingress.yml
+
+oc get ingress
+oc describe ingress/tektutor
+
+curl http://tektutor.apps.ocp4.tektutor.org.labs/nginx
+curl http://tektutor.apps.ocp4.tektutor.org.labs/hello
+```
+
+Expected output
+```
+jegan@tektutor.org  ~/openshift-may-2024/Day5/ingress   main ●  oc get ingresses.config/cluster -o jsonpath={.spec.domain}
+apps.ocp4.tektutor.org.labs%                                                                                                           jegan@tektutor.org  ~/openshift-may-2024/Day5/ingress   main ●  vim ingress.yml 
+jegan@tektutor.org  ~/openshift-may-2024/Day5/ingress   main ●  oc apply -f ingress.yml 
+ingress.networking.k8s.io/tektutor created
+ jegan@tektutor.org $ ~/openshift-may-2024/Day5/ingress   main ●  oc get ingress
+NAME       CLASS    HOSTS                                  ADDRESS                                      PORTS   AGE
+tektutor   <none>   tektutor.apps.ocp4.tektutor.org.labs   router-default.apps.ocp4.tektutor.org.labs   80      7s
+jegan@tektutor.org $ ~/openshift-may-2024/Day5/ingress   main ●  oc describe ingress/tektutor
+Name:             tektutor
+Labels:           <none>
+Namespace:        jegan
+Address:          router-default.apps.ocp4.tektutor.org.labs
+Ingress Class:    <none>
+Default backend:  <default>
+Rules:
+  Host                                  Path  Backends
+  ----                                  ----  --------
+  tektutor.apps.ocp4.tektutor.org.labs  
+                                        /nginx   nginx:8080 (10.128.2.52:8080,10.130.0.31:8080,10.131.0.23:8080)
+                                        /hello   hello:8080 (10.128.0.163:8080,10.128.2.51:8080,10.131.0.24:8080)
+Annotations:                            haproxy.router.openshift.io/rewrite-target: /
+Events:                                 <none>
+ jegan@tektutor.org $ ~/openshift-may-2024/Day5/ingress   main ●  curl http://tektutor.apps.ocp4.tektutor.org.labs/nginx
+<!DOCTYPE html>
+<html>
+<head>
+<title>Welcome to nginx!</title>
+<style>
+html { color-scheme: light dark; }
+body { width: 35em; margin: 0 auto;
+font-family: Tahoma, Verdana, Arial, sans-serif; }
+</style>
+</head>
+<body>
+<h1>Welcome to nginx!</h1>
+<p>If you see this page, the nginx web server is successfully installed and
+working. Further configuration is required.</p>
+
+<p>For online documentation and support please refer to
+<a href="http://nginx.org/">nginx.org</a>.<br/>
+Commercial support is available at
+<a href="http://nginx.com/">nginx.com</a>.</p>
+
+<p><em>Thank you for using nginx.</em></p>
+</body>
+</html>
+jegan@tektutor.org $ ~/openshift-may-2024/Day5/ingress   main ●  curl http://tektutor.apps.ocp4.tektutor.org.labs/hello
+Greetings from Spring Boot!	
+```
 
 ## What does Serverless mean?
 - serverless does not mean the absence of servers
@@ -232,3 +321,123 @@ Select "pipeline" project
   1. Build
   2. Eventing
   3. Serving
+
+
+## Lab - Deploying a knative service
+```
+kn service create hello \
+--image ghcr.io/knative/helloworld-go:latest \
+--port 8080
+--env TARGET=World
+```
+
+Expected output
+![knative](knative1.png)
+
+Accessing the knative application
+```
+curl -k https://hello-jegan.apps.ocp4.tektutor.org.labs
+```
+
+Expected output
+![knative](knative2.png)
+
+
+Update the service
+```
+kn service update hello --env TARGET=Knative
+kn revisions list
+```
+
+Expected output
+![knative](knative3.png)
+
+Splitting the traffic between two revisions
+```
+kn service update hello --traffic hello-00001=50 --traffic @latest=50
+kn revisions list
+```
+
+Expected output
+![knative](knative4.png)
+![knative](knative5.png)
+
+Deleting the knative service
+```
+kn service list
+kn service delete hello
+kn service list
+```
+
+Expected output
+![knative](knative6.png)
+
+## Lab - Knative eventing
+
+Let's deploy a sink service
+```
+oc project jegan
+kn service create eventinghello --concurrency-target=1 --image=quay.io/rhdevelopers/eventinghello:0.0.2
+```
+
+Expected output
+![knative](knative7.png)
+
+Let's create an event source application
+```
+kn source ping create eventinhello-ping-source --schedule="*/2 * * * *" --data '{"message": "Thanks for your message"}' --sink ksvc:eventinghello
+```
+
+Expected output
+![knative](knative8.png)
+![knative](knative9.png)
+![knative](knative10.png)
+![knative](knative11.png)
+![knative](knative12.png)
+
+## Lab - Scheduling 
+
+Let's say our application involves loads of disk read/write, hence our application prefers nodes that has SSD disk.
+- Scheduler will search for nodes that has SSD disks, if the Scheduler is able to find nodes that has SSD disks then the Pods will be
+  deployed onto those nodes that has SSD disks
+- In case the scheduler is not able to find nodes has SSD disk, then it would still deploy the Pods on nodes that doesn't have SSD disks in case your affinitiy type is "Preferred"
+```
+cd ~/openshift-may-2024
+git pull
+cd Day5/scheduling
+oc apply -f nginx-deploy-with-preffered-node-affinity.yml
+oc get po
+oc get po -o wide
+```
+
+Expected output
+![Node Affinity](preferred.png)
+
+Let's delete the preferred Disk affinity scheduling
+```
+cd ~/openshift-may-2024
+git pull
+cd Day5/scheduling
+oc delete -f nginx-deploy-with-preffered-node-affinity.yml
+```
+
+Let's deploy the required Disk affinity scheduling
+```
+cd ~/openshift-may-2024
+git pull
+cd Day5/scheduling
+oc apply -f nginx-deploy-with-required-node-affinity.yml
+```
+Expected output
+![Node Affinity](required.png)
+
+
+## Post-test - Kindly complete the test from RPS Lab machine
+<pre>
+https://app.mymapit.in/code4/tiny/wiSvSn
+</pre>
+ 
+## Feedback - kindly fill up your feedback here
+<pre>
+https://survey.zohopublic.com/zs/cHD3Vm
+</pre>
